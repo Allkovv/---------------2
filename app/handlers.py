@@ -17,24 +17,22 @@ delp = None
 addL = None
 delL = None
 selectList = None
-userList = None
+quserList = None
 
 def upDate_userList(userText):
     global userList
     connection.connect()
-    with connection.cursor() as cursor:
-            sql = "SELECT `name` FROM `users_lists` WHERE `name`=%s"
-            cursor.execute(sql, (userText))
-            result = cursor.fetchone()
-            if result is None:
+    # with connection.cursor() as cursor:
+    #         sql = "SELECT `name` FROM `users_lists` WHERE `name`=%s"
+    #         cursor.execute(sql, (userText))
+    #         result = cursor.fetchone()
+    #         if result is None:
                 
-            else:
-                await message.answer("Вы уже зарегестрированы", reply_markup=kb.start_keyboard)
-                connection.commit()
+    #         else:
+    #             await message.answer("Вы уже зарегестрированы", reply_markup=kb.start_keyboard)
+    #             connection.commit()
         
-    # userList = userText
-    
-    
+    userList = userText
     print("List", userList)
     selectList_off()
     return userList
@@ -115,10 +113,19 @@ async def cmd_start(message: Message):
 
 
 async def show_lists(message: Message):
-    text = "Списки:\n"
-    for i, key in enumerate(shopping_lists,start=1):
-        text += f"{i}. {key}\n"
-    text += "\nВыберите действие или введите название списка, чтобы его открыть:"
+    connection.connect()
+    with connection.cursor() as cursor:
+        text = "Списки:\n"
+        sql = "SELECT `name` FROM `users_lists` where `id` IN (Select `list_id` from `user_to_list` where `user_id` IN(SELECT `id` from `users` where `tg_id` = %s))"
+        cursor.execute(sql, ({message.from_user.id}))
+        result = cursor.fetchall()
+        connection.commit()
+        print(result)
+        for j in result:
+            for i, values in enumerate(j, start=1):
+                values = j.get('name')
+            text += f"- {values}\n"
+        text += "\nВыберите действие или введите название списка, чтобы его открыть:"
     await message.answer(text, reply_markup=kb.lists_keyboard)
     
 
@@ -188,73 +195,142 @@ async def add_product( message: Message):
     return on_off()
 
 async def addProduct(message: Message):
-    shopping_list = shopping_lists[userList]
-    if len(shopping_list) == 0:
-        text= "Список пуст\nВыберите действие:"
+    connection.connect()
+    with connection.cursor() as cursor:
+        sql = "SELECT `list_now` FROM `users` where `tg_id` = %s"
+        cursor.execute(sql, ({message.from_user.id}))
+        result = cursor.fetchone()
+        connection.commit()
+        print(result)
+        userList = result.get('list_now')
+        sql2 = "SELECT `name` FROM `shop_items` where `id` IN (Select `item_id` from `list_to_items` where `list_id` IN(Select `id` from `users_lists` where `name` = %s ))"
+        cursor.execute(sql2,(userList))
+        user_Items_List = cursor.fetchall()
+        text = f"Список `{userList}`:\n"
+        for j in user_Items_List:
+            for i, values in enumerate(j,start=1):
+                values = j.get('name')
+            text += f"- {values}\n"
+        text+="\nВыберите действие:"
         await message.answer(text, reply_markup=kb.add_or_del)
-    elif len(shopping_list) != 0:
-        text = "Список продуктов:\n"
-        for i, item in enumerate(shopping_list, start=1):
-            text += f"{i}. {item}\n"
-        text += "\nВыберите действие:"
-        await message.answer(text, reply_markup=kb.add_or_del)
-        selectList_off()
+        
+    
+    
+    
+    # if len(shopping_list) == 0:
+    #     text= "Список пуст\nВыберите действие:"
+    #     await message.answer(text, reply_markup=kb.add_or_del)
+    # elif len(shopping_list) != 0:
+    #     text = "Список продуктов:\n"
+    #     for i, item in enumerate(shopping_list, start=1):
+    #         text += f"{i}. {item}\n"
+    #     text += "\nВыберите действие:"
+    #     await message.answer(text, reply_markup=kb.add_or_del)
+    #     selectList_off()
 
 @router.message()
 async def actions(message: Message):
     if selectList == True:
         try:
-            upDate_userList(message.text)
-            await addProduct(message)
-        except KeyError:
+            connection.connect()
+            list_name = message.text.lower()
+            with connection.cursor() as cursor:
+                try:
+                    sql = "SELECT `name` FROM `users_lists` WHERE `name` = %s AND (SELECT `list_id` from `user_to_list` Where `list_id` =(SELECT `id` FROM `users_lists` where `name` = %s) AND (SELECT `id` from `users` where `tg_id` = %s))"
+                    cursor.execute(sql, (list_name, list_name, {message.from_user.id}))
+                    result = cursor.fetchone()
+                    print(result)
+                    if list_name == result.get('name'):
+                        sql2 ="UPDATE `users` SET `list_now` = %s Where `tg_id` = %s"
+                        cursor.execute(sql2, (list_name, {message.from_user.id}))
+                        connection.commit()
+                        await addProduct(message)
+                        selectList_off()
+                    else:
+                        await message.answer("Неверное название списка 1")
+                        return selectList_off()
+                except KeyError:
+                    await message.answer("Неверное название списка 2")
+                    return selectList_off()
+        except AttributeError:
             await message.answer("Неверное название списка")
-            return selectList_off()
+            
     elif addp == True:
         connection.connect()
         with connection.cursor() as cursor:
-            product_name = message.text
+            product_name = message.text.lower()
             sql = "INSERT INTO `shop_items`(`name`) VALUES (%s)"
             cursor.execute(sql, (product_name))
-            # shopping_list = shopping_lists[userList]
-            # shopping_list.append(product_name.lower())
+            connection.commit()
+            
+            connection.connect()
+            sql2 = "INSERT INTO `list_to_items`(`list_id`, `item_id`) VALUES ((SELECT `id` FROM `users_lists` WHERE `name` = (SELECT `list_now` from `users` where `tg_id` = %s)), (SELECT `id` FROM `shop_items` WHERE `name` = %s))"
+            cursor.execute(sql2, ({message.from_user.id}, product_name))
+            connection.commit()
+            
             await message.answer(f"Продукт {product_name} добавлен в список.", reply_markup=kb.lists_keyboard)
             await addProduct(message)
             off_on()
-            connection.commit()
     elif delp == True:
         try:
-            input_number = int(message.text)
-            shopping_list = shopping_lists[userList]
-            if 1 <= input_number <= len(shopping_list):
-                deleted_product = shopping_list.pop(input_number - 1)
-                await message.answer(f"Продукт {deleted_product} удален из списка.", reply_markup=kb.lists_keyboard)
+            connection.connect()
+            item_name = message.text.lower()
+            with connection.cursor() as cursor:
+                sql = "DELETE FROM `list_to_items` WHERE `list_id` IN (SELECT `id` from `users_lists` WHERE `name` = (SELECT `list_now` from `users` where `tg_id` = %s) AND `item_id` IN(select `id` from `shop_items` where `name` = %s))"
+                cursor.execute(sql, ({message.from_user.id}, item_name))
+                connection.commit()
+                # await message.answer(f"Продукт {item_name} удален из списка.", reply_markup=kb.lists_keyboard)
                 await addProduct(message)
                 del_off()
-            else:
-                await message.answer("Неверный номер продукта. Пожалуйста, введите корректный номер.")
-        except ValueError:
-            await message.answer("Неверный формат ввода. Пожалуйста, введите номер продукта для удаления.")
-            del_off()
+        except:
+            pass
+        
+        
+        # try:
+        #     input_number = int(message.text)
+        #     shopping_list = shopping_lists[userList]
+        #     if 1 <= input_number <= len(shopping_list):
+        #         deleted_product = shopping_list.pop(input_number - 1)
+        #         await message.answer(f"Продукт {deleted_product} удален из списка.", reply_markup=kb.lists_keyboard)
+        #         await addProduct(message)
+        #         del_off()
+        #     else:
+        #         await message.answer("Неверный номер продукта. Пожалуйста, введите корректный номер.")
+        # except ValueError:
+        #     await message.answer("Неверный формат ввода. Пожалуйста, введите номер продукта для удаления.")
+        #     del_off()
     elif addL == True:
         connection.connect()
         with connection.cursor() as cursor:
-            list_name = message.text
+            list_name = message.text.lower()
             sql = "INSERT INTO `users_lists` (`name`) VALUES (%s)"
+            
             cursor.execute(sql, (list_name))
             connection.commit()
+            
+            connection.connect()
+            sql2 = "INSERT INTO `user_to_list`(`user_id`, `list_id`) VALUES ((SELECT `id` FROM `users` WHERE `tg_id` = %s), (SELECT `id` FROM `users_lists` WHERE `name` = %s))"
+            cursor.execute(sql2, ({message.from_user.id}, list_name))
+            connection.commit()
+            
             await message.answer(f"{list_name} добавлен в списки", reply_markup=kb.lists_keyboard)
             await show_lists(message)
+            
             selectList_on()
             return add_List_off()
     elif delL == True:
         connection.connect()
         with connection.cursor() as cursor:
             try:
-                list_name = message.text
-                sql = "DELETE FROM `users_lists` WHERE `name` = %s"
-                cursor.execute(sql, (list_name))
+                list_name = message.text.lower()
+                sql2 = "DELETE FROM `user_to_list` WHERE `user_id` IN (SELECT `id` FROM `users` WHERE `tg_id` = %s) AND `list_id` IN (SELECT `id` FROM `users_lists` WHERE `name` = %s)"
+                cursor.execute(sql2, ({message.from_user.id}, list_name))
                 connection.commit()
-                await message.answer(f"{list_name} удалён из списков", reply_markup=kb.lists_keyboard)
+                # sql = "DELETE FROM `users_lists` WHERE `id` IN (SELECT `list_id` FROM `user_to_list` WHERE `user_id` IN (SELECT `id` FROM `users` WHERE `tg_id` = %s))"
+                # cursor.execute(sql, ({message.from_user.id}))
+                
+                
+                # await message.answer(f"{list_name} удалён из списков", reply_markup=kb.lists_keyboard)
                 await show_lists(message)
                 selectList_on()
                 return del_List_off()
