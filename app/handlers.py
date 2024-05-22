@@ -1,7 +1,11 @@
+
 from aiogram import F, Router
 from aiogram.filters import CommandStart
 from aiogram.types import Message, Sticker
-from aiogram import Dispatcher
+
+import pymysql.cursors
+
+from app.database.connections import connection
 
 import app.keyboards as kb
 
@@ -17,7 +21,20 @@ userList = None
 
 def upDate_userList(userText):
     global userList
-    userList = userText
+    connection.connect()
+    with connection.cursor() as cursor:
+            sql = "SELECT `name` FROM `users_lists` WHERE `name`=%s"
+            cursor.execute(sql, (userText))
+            result = cursor.fetchone()
+            if result is None:
+                
+            else:
+                await message.answer("Вы уже зарегестрированы", reply_markup=kb.start_keyboard)
+                connection.commit()
+        
+    # userList = userText
+    
+    
     print("List", userList)
     selectList_off()
     return userList
@@ -93,7 +110,7 @@ def selectList_off():
 
 @router.message(CommandStart())
 async def cmd_start(message: Message):
-    await message.answer(f'Привет, {message.from_user.full_name}. Тут вы можете следить за обновлениями, а также составлять свой список покупок =)', reply_markup=kb.start_keyboard)
+    await message.answer(f'Привет, {message.from_user.full_name}. Это телеграм Бот, где вы можете создавать различные списки и редактировать их. Чтобы продолжить нужно зарегестроваться. Для регестрации напишите "Пароль".', reply_markup=kb.register)
 
 
 
@@ -104,7 +121,24 @@ async def show_lists(message: Message):
     text += "\nВыберите действие или введите название списка, чтобы его открыть:"
     await message.answer(text, reply_markup=kb.lists_keyboard)
     
-    
+
+@router.message(F.text.lower()=="пароль")
+async def getPass(message: Message):
+    connection.connect()
+    with connection:
+        with connection.cursor() as cursor:
+            sql = "SELECT `tg_id` FROM `users` WHERE `tg_id`=%s"
+            cursor.execute(sql, ({message.from_user.id}))
+            result = cursor.fetchone()
+            if result is None:
+                sql = "INSERT INTO `users` (`user_name`, `tg_id`) VALUES (%s, %s)"
+                cursor.execute(sql, ({message.from_user.full_name}, {message.from_user.id} ))
+                connection.commit()
+                await message.answer("Вы зарегестрированы", reply_markup=kb.start_keyboard)
+            else:
+                await message.answer("Вы уже зарегестрированы", reply_markup=kb.start_keyboard)
+                connection.commit()
+
 @router.message(F.text.lower() =='обновления')
 async def show_menu(message: Message):
     await message.answer("На данный момент обновлений не было. \n Это бета-тест, ваши списки не сохраняются на всё время =))", reply_markup=kb.start_keyboard)
@@ -176,12 +210,17 @@ async def actions(message: Message):
             await message.answer("Неверное название списка")
             return selectList_off()
     elif addp == True:
-        product_name = message.text
-        shopping_list = shopping_lists[userList]
-        shopping_list.append(product_name.lower())
-        await message.answer(f"Продукт {product_name} добавлен в список.", reply_markup=kb.lists_keyboard)
-        await addProduct(message)
-        off_on()
+        connection.connect()
+        with connection.cursor() as cursor:
+            product_name = message.text
+            sql = "INSERT INTO `shop_items`(`name`) VALUES (%s)"
+            cursor.execute(sql, (product_name))
+            # shopping_list = shopping_lists[userList]
+            # shopping_list.append(product_name.lower())
+            await message.answer(f"Продукт {product_name} добавлен в список.", reply_markup=kb.lists_keyboard)
+            await addProduct(message)
+            off_on()
+            connection.commit()
     elif delp == True:
         try:
             input_number = int(message.text)
@@ -197,23 +236,31 @@ async def actions(message: Message):
             await message.answer("Неверный формат ввода. Пожалуйста, введите номер продукта для удаления.")
             del_off()
     elif addL == True:
-        list_name = message.text
-        shopping_lists[list_name] = []
-        await message.answer(f"{list_name} добавлен в списки", reply_markup=kb.lists_keyboard)
-        await show_lists(message)
-        selectList_on()
-        return add_List_off()
-    elif delL == True:
-        try:
+        connection.connect()
+        with connection.cursor() as cursor:
             list_name = message.text
-            del shopping_lists[list_name]
-            await message.answer(f"{list_name} удалён из списков", reply_markup=kb.lists_keyboard)
+            sql = "INSERT INTO `users_lists` (`name`) VALUES (%s)"
+            cursor.execute(sql, (list_name))
+            connection.commit()
+            await message.answer(f"{list_name} добавлен в списки", reply_markup=kb.lists_keyboard)
             await show_lists(message)
             selectList_on()
-            return del_List_off()
-        except KeyError:
-            await message.answer("Неверное название списка")
-            return del_List_off()
+            return add_List_off()
+    elif delL == True:
+        connection.connect()
+        with connection.cursor() as cursor:
+            try:
+                list_name = message.text
+                sql = "DELETE FROM `users_lists` WHERE `name` = %s"
+                cursor.execute(sql, (list_name))
+                connection.commit()
+                await message.answer(f"{list_name} удалён из списков", reply_markup=kb.lists_keyboard)
+                await show_lists(message)
+                selectList_on()
+                return del_List_off()
+            except KeyError:
+                await message.answer("Неверное название списка")
+                return del_List_off()
     else:
         await message.answer("Список не выбран", reply_markup=kb.lists_keyboard)
 

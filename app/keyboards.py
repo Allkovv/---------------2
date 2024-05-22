@@ -14,3 +14,7 @@ add_or_del = ReplyKeyboardMarkup(keyboard=[
     [KeyboardButton(text='Добавить продукт'), KeyboardButton(text='Удалить продукт')],
     [KeyboardButton(text=('Списки'))]
     ],resize_keyboard=True)
+
+register = ReplyKeyboardMarkup(keyboard=[
+    [KeyboardButton(text="Пароль")]
+], resize_keyboard=True)
